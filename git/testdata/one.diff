@@ -1,0 +1,8 @@
+@ -19,3 +40,4 @@ func NewTUI(state *git.State, selectedStyle lipgloss.Style) *TUI {
+-               state:         state,
+-               selectedStyle: selectedStyle,
+-               selectedIndex: 0,
++               state:             state,
++               selectedStyle:     selectedStyle,
++               selectedFileIndex: 0,
++               mode:              fileSelectMode,
