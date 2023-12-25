@@ -8,16 +8,15 @@ import (
 )
 
 func main() {
-	s, err := git.LoadCurrentState()
+	s, err := git.Current()
 	if err != nil {
 		panic(err)
 	}
 
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("177")).Bold(true)
+	selectedItemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true)
 
-	t := tui.NewTUI(s, selectedStyle)
-	err = t.Run()
-	if err != nil {
+	t := tui.NewTUI(s, selectedItemStyle)
+	if err = t.Run(); err != nil {
 		panic(err)
 	}
 }
