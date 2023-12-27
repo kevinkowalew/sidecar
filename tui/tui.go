@@ -3,79 +3,60 @@ package tui
 import (
 	"fmt"
 	"gitdiff/git"
-	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 const (
-	diffSelectMode = "diffSelect"
-	diffMode       = "diffMode"
+	fileDiffMode    = "fileDiffMode"
+	viewChangesMode = "viewChanges"
 )
 
 var (
-	oldLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(false)
-	newLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(false)
+	oldLineStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF0000")).
+			Bold(false)
+	newLineStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#00FF00")).
+			Bold(false)
+	menuItemStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#6F8FAF")).
+			Bold(false).
+			PaddingLeft(1).
+			PaddingRight(1)
 )
 
 type TUI struct {
 	status        *git.Status
 	selectedStyle lipgloss.Style
 
-	selectedFileDiffIndex int
-	selectedDiffLineIndex int
-
-	deletedDiff        map[int]bool
-	deletedDiffHistory []int
-
-	mode string
+	selectedDiff  *git.FileDiff
+	selectedChunk *git.FileDiffChunk
+	mode          string
 }
 
 func NewTUI(status *git.Status, selectedStyle lipgloss.Style) *TUI {
-	return &TUI{
-		status:                status,
-		selectedStyle:         selectedStyle,
-		selectedFileDiffIndex: 0,
-		selectedDiffLineIndex: 0,
-		mode:                  diffSelectMode,
-		deletedDiff:           make(map[int]bool, 0),
+	tui := &TUI{
+		status:        status,
+		selectedStyle: selectedStyle,
+		mode:          fileDiffMode,
 	}
+
+	if len(status.StagedFileDiffs) > 0 {
+		tui.selectedDiff = &status.StagedFileDiffs[0]
+	} else if len(status.UnstagedFileDiffs) > 0 {
+		tui.selectedDiff = &status.UnstagedFileDiffs[0]
+	}
+	return tui
 }
 
-func (t TUI) SelectedFileDiff() *git.FileDiff {
-	if t.selectedFileDiffIndex < len(t.status.StagedFileDiffs) {
-		return &t.status.StagedFileDiffs[t.selectedFileDiffIndex]
-	}
-
-	adjustedIndex := t.selectedFileDiffIndex - len(t.status.UnstagedFileDiffs)
-	if adjustedIndex < len(t.status.UnstagedFileDiffs) {
-		return &t.status.UnstagedFileDiffs[t.selectedFileDiffIndex]
-	}
-
+func (t *TUI) Init() tea.Cmd {
 	return nil
 }
 
-func (t TUI) AdjustedSelectedFileDiffIndex() int {
-	if t.selectedFileDiffIndex < len(t.status.StagedFileDiffs) {
-		return t.selectedFileDiffIndex
-	}
-	return t.selectedFileDiffIndex - len(t.status.StagedFileDiffs)
-}
-
-func (t TUI) Init() tea.Cmd {
-	return nil
-}
-
-func (t TUI) DiffSelectMode() bool {
-	return t.mode == diffSelectMode
-}
-
-func (t TUI) DiffMode() bool {
-	return t.mode == diffMode
-}
-
-func (t TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
@@ -83,48 +64,29 @@ func (t TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+c":
 			return t, tea.Quit
-		case "d":
-			if t.DiffMode() {
-				t.deletedDiff[t.selectedDiffLineIndex] = true
-				t.deletedDiffHistory = append(t.deletedDiffHistory, t.selectedDiffLineIndex)
-			}
-		case "u":
-			if t.DiffMode() {
-				if len(t.deletedDiffHistory) > 0 {
-					delete(t.deletedDiff, t.deletedDiffHistory[len(t.deletedDiffHistory)-1])
-					t.deletedDiffHistory = t.deletedDiffHistory[:len(t.deletedDiffHistory)-1]
-				}
-			}
 		case "c":
-			if t.DiffSelectMode() {
-				t.toggleSelectedFileDiff()
-			}
+			t.toggleSelectedFileDiff()
 		case "q":
-			if t.DiffSelectMode() {
+			if t.mode == fileDiffMode {
 				return t, tea.Quit
 			}
 		case "esc":
-			if t.DiffSelectMode() {
+			if t.mode == fileDiffMode {
 				return t, tea.Quit
-			} else if t.DiffMode() {
-				t.mode = diffSelectMode
-			}
-		case "up", "k":
-			if t.DiffSelectMode() && t.selectedFileDiffIndex > 0 {
-				t.selectedFileDiffIndex--
-			} else if t.DiffMode() && t.selectedDiffLineIndex > 0 {
-				t.selectedDiffLineIndex--
-			}
-		case "down", "j":
-			if t.DiffSelectMode() && t.selectedFileDiffIndex < len(t.status.StagedFileDiffs)+len(t.status.UnstagedFileDiffs)-1 {
-				t.selectedFileDiffIndex++
-			} else if t.DiffMode() {
-				t.selectedDiffLineIndex++
+			} else if t.mode == viewChangesMode {
+				t.mode = fileDiffMode
 			}
 		case "enter":
-			if t.DiffSelectMode() && !t.SelectedFileDiff().Deleted() {
-				t.mode = diffMode
-				t.selectedDiffLineIndex = 0
+			if t.mode == fileDiffMode {
+				t.mode = viewChangesMode
+			}
+		case "up", "k":
+			if t.mode == fileDiffMode {
+				t.moveCursorBack()
+			}
+		case "down", "j":
+			if t.mode == fileDiffMode {
+				t.moveCursorForward()
 			}
 		}
 	}
@@ -132,103 +94,134 @@ func (t TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t, nil
 }
 
-func printDiffs(diffs []git.FileDiff) string {
-	s := "["
-	for _, diff := range diffs {
-		s += diff.Filename + ", "
+func (t *TUI) moveCursorForward() {
+	if t.selectedDiff == nil {
+		return
 	}
-	s += "]"
-	return s
+
+	next := false
+	for _, diff := range t.status.StagedFileDiffs {
+		if diff.Equals(*t.selectedDiff) {
+			next = true
+		} else if next {
+			t.selectedDiff = &diff
+			return
+		}
+	}
+	for _, diff := range t.status.UnstagedFileDiffs {
+		if diff.Equals(*t.selectedDiff) {
+			next = true
+		} else if next {
+			t.selectedDiff = &diff
+			return
+		}
+	}
 }
 
-func (t TUI) View() string {
-	s := fmt.Sprint(t.selectedFileDiffIndex)
-	s += "\n\n"
-	s += printDiffs(t.status.StagedFileDiffs)
-	s += "\n\n"
-	s += printDiffs(t.status.UnstagedFileDiffs)
-	s += "\nCommited:\n"
-	if t.DiffSelectMode() {
-		for i, diff := range t.status.StagedFileDiffs {
-			s += t.styleFileDiffLine(i, diff, true)
-		}
+func (t *TUI) moveCursorBack() {
+	if t.selectedDiff == nil {
+		return
+	}
 
-		s += "\nUncommitted:\n"
-		for i, diff := range t.status.UnstagedFileDiffs {
-			s += t.styleFileDiffLine(i, diff, false)
-		}
-
-	} else if t.DiffMode() {
-		index := 0
-		for _, chunk := range t.SelectedFileDiff().Chunks {
-			for _, l := range chunk.Old.Lines {
-				s += t.styleDiffDetailLine(index, l)
-			}
-			index++
-
-			for _, l := range chunk.New.Lines {
-				s += t.styleDiffDetailLine(index, l)
-			}
-
-			index++
-			s += "\n"
+	next := false
+	for i := len(t.status.UnstagedFileDiffs) - 1; i >= 0; i-- {
+		diff := t.status.UnstagedFileDiffs[i]
+		if diff.Equals(*t.selectedDiff) {
+			next = true
+			continue
+		} else if next {
+			t.selectedDiff = &diff
+			return
 		}
 	}
 
-	s += "\n"
-	s += t.createMenuString()
+	for i := len(t.status.StagedFileDiffs) - 1; i >= 0; i-- {
+		diff := t.status.StagedFileDiffs[i]
+		if diff.Equals(*t.selectedDiff) {
+			next = true
+			continue
+		} else if next {
+			t.selectedDiff = &diff
+			return
+		}
+	}
+}
 
+func (t *TUI) View() string {
+	if t.mode == fileDiffMode {
+		s := "Commited:\n"
+		for _, diff := range t.status.StagedFileDiffs {
+			s += t.styleFileDiffLine(diff)
+		}
+		s += "\n"
+
+		s += "Uncommited:\n"
+		for _, diff := range t.status.UnstagedFileDiffs {
+			s += t.styleFileDiffLine(diff)
+		}
+		s += "\n"
+
+		s += t.createMenu()
+		return s
+	}
+
+	s := ""
+	for _, chunk := range t.selectedDiff.Chunks {
+		s += t.styleChunk(chunk)
+		s += "\n\n"
+	}
 	return s
 }
 
-func (t TUI) styleFileDiffLine(index int, diff git.FileDiff, staged bool) string {
+func (t *TUI) styleChunk(chunk git.FileDiffChunk) string {
+	return t.styleSnippet(chunk.Old, oldLineStyle) + t.styleSnippet(chunk.New, newLineStyle)
+}
+
+func (t *TUI) styleSnippet(snippet git.Snippet, style lipgloss.Style) string {
+	s := ""
+	for _, line := range snippet.Lines {
+		s += style.Render(line)
+		s += "\n"
+	}
+	return s
+}
+
+func (t *TUI) styleFileDiffLine(diff git.FileDiff) string {
 	txt := ""
 	if diff.Deleted() {
-		txt += "deleted: "
+		txt += "  deleted: "
 	} else {
-		txt += "modified: "
+		txt += "  modified: "
 	}
 	txt += diff.Filename
 
-	if t.isSelectedDiffIndex(index, staged) {
-		return t.selectedStyle.Render(txt) + "\n"
+	if t.selectedDiff != nil {
+		if diff.Equals(*t.selectedDiff) {
+			return t.selectedStyle.Render(txt) + "\n"
+		}
 	}
 	return txt + "\n"
 }
 
-func (t TUI) styleDiffDetailLine(index int, l string) string {
-	if t.isDeletedDiffIndex(index) {
-		return ""
-	}
-	if index == t.selectedDiffLineIndex {
-		return t.selectedStyle.Render(l) + "\n"
-	}
-	return newLineStyle.Render(l) + "\n"
-}
-
-func (t TUI) toggleSelectedFileDiff() {
-	diff := *t.SelectedFileDiff()
-	if t.selectedFileDiffIndex < len(t.status.StagedFileDiffs) {
-		t.status.StagedFileDiffs = deleteElement(t.status.StagedFileDiffs, t.selectedFileDiffIndex)
-		t.status.UnstagedFileDiffs = append(t.status.UnstagedFileDiffs, diff)
-		git.SortFileDiffs(t.status.UnstagedFileDiffs)
-	} else {
-		t.status.UnstagedFileDiffs = deleteElement(t.status.UnstagedFileDiffs, t.AdjustedSelectedFileDiffIndex())
-		t.status.StagedFileDiffs = append(t.status.StagedFileDiffs, diff)
-		git.SortFileDiffs(t.status.StagedFileDiffs)
+func (t *TUI) toggleSelectedFileDiff() {
+	if t.selectedDiff == nil {
+		return
 	}
 
-	for i, d := range t.status.StagedFileDiffs {
-		if d.Equals(diff) {
-			t.selectedFileDiffIndex = i
+	for i, diff := range t.status.StagedFileDiffs {
+		if diff.Equals(*t.selectedDiff) {
+			t.status.StagedFileDiffs = deleteElement(t.status.StagedFileDiffs, i)
+			t.status.UnstagedFileDiffs = append(t.status.UnstagedFileDiffs, diff)
+			git.SortFileDiffs(t.status.UnstagedFileDiffs)
 			return
 		}
 	}
-
-	for i, d := range t.status.UnstagedFileDiffs {
-		if d.Equals(diff) {
-			t.selectedFileDiffIndex = i + len(t.status.StagedFileDiffs)
-			return
+	for i, diff := range t.status.UnstagedFileDiffs {
+		if diff.Equals(*t.selectedDiff) {
+			t.status.UnstagedFileDiffs = deleteElement(t.status.UnstagedFileDiffs, i)
+			t.status.StagedFileDiffs = append(t.status.StagedFileDiffs, diff)
+			git.SortFileDiffs(t.status.StagedFileDiffs)
+			break
 		}
 	}
 }
@@ -254,20 +247,7 @@ func deleteElement(slice []git.FileDiff, index int) []git.FileDiff {
 	return append(slice[:index], slice[index+1:]...)
 }
 
-func (t TUI) sortDiffsByName() {
-	sort.Slice(t.status.StagedFileDiffs, func(i, j int) bool {
-		return t.status.StagedFileDiffs[i].Filename < t.status.StagedFileDiffs[j].Filename
-	})
-	sort.Slice(t.status.UnstagedFileDiffs, func(i, j int) bool {
-		return t.status.UnstagedFileDiffs[i].Filename < t.status.UnstagedFileDiffs[j].Filename
-	})
-}
-
-func (t TUI) createMenuString() string {
-	if t.DiffMode() {
-		return ""
-	}
-
+func (t *TUI) createMenu() string {
 	type menuItem struct {
 		key  string
 		name string
@@ -275,38 +255,23 @@ func (t TUI) createMenuString() string {
 
 	var items []menuItem
 	items = append(items, menuItem{key: "c", name: "Toggle"})
-	items = append(items, menuItem{key: "enter", name: "Enter"})
-	items = append(items, menuItem{key: "d", name: "Delete"})
-	items = append(items, menuItem{key: "u", name: "Undo"})
-	items = append(items, menuItem{key: "esc", name: "Apply"})
+	items = append(items, menuItem{key: "v", name: "View"})
+	items = append(items, menuItem{key: "esc", name: "Quity"})
 
 	s := "    "
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#6F8FAF")).Bold(false).PaddingLeft(1).PaddingRight(1)
 	for i, item := range items {
 		msg := ""
 		if i > 0 {
 			s += "  "
 		}
 		msg += fmt.Sprintf("%s (%s)", item.name, item.key)
-		s += style.Render(msg)
+		s += menuItemStyle.Render(msg)
 	}
 	return s
 }
 
-func (t TUI) isDeletedDiffIndex(index int) bool {
-	_, ok := t.deletedDiff[index]
-	return ok
-}
-
-func (t TUI) isSelectedDiffIndex(index int, stagedDiff bool) bool {
-	if stagedDiff {
-		return index == t.selectedFileDiffIndex
-	} else {
-		return index == t.AdjustedSelectedFileDiffIndex()
-	}
-}
-
-func (tui TUI) Run() error {
+func (tui *TUI) Run() error {
 	_, err := tea.NewProgram(tui).Run()
+
 	return err
 }

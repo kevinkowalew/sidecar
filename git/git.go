@@ -18,8 +18,8 @@ const (
 
 type (
 	Snippet struct {
-		start  int
-		length int
+		Start  int
+		Length int
 		Lines  []string
 	}
 
@@ -62,7 +62,7 @@ func (c FileDiffChunk) Equals(oc FileDiffChunk) bool {
 }
 
 func (s Snippet) Equals(os Snippet) bool {
-	return s.start == os.start && s.length == os.length && slicesEqual(s.Lines, os.Lines)
+	return s.Start == os.Start && s.Length == os.Length && slicesEqual(s.Lines, os.Lines)
 }
 
 func slicesEqual(s1, s2 []string) bool {
@@ -274,7 +274,7 @@ func parseFileDiffChunk(filename string, lines []string) (*FileDiffChunk, error)
 	}
 
 	for i := 1; i < len(lines); i++ {
-		if i <= oldSnippet.length {
+		if i <= oldSnippet.Length {
 			oldSnippet.Lines = append(oldSnippet.Lines, lines[i])
 		} else {
 			newSnippet.Lines = append(newSnippet.Lines, lines[i])
@@ -296,9 +296,9 @@ func parseSnippet(s string) (*Snippet, error) {
 		return nil, errors.New("failed to parse start: " + err.Error())
 	}
 
-	snippet := &Snippet{start: start}
+	snippet := &Snippet{Start: start}
 	if len(p) == 1 {
-		snippet.length = 1
+		snippet.Length = 1
 		return snippet, nil
 	}
 
@@ -306,7 +306,7 @@ func parseSnippet(s string) (*Snippet, error) {
 	if err != nil {
 		return nil, errors.New("failed to parse length: " + err.Error())
 	}
-	snippet.length = length
+	snippet.Length = length
 	return snippet, nil
 }
 
