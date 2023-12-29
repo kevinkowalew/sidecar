@@ -9,17 +9,14 @@ import (
 )
 
 const (
-	fileDiffMode    = "fileDiffMode"
-	viewChangesMode = "viewChanges"
+	fileDiffMode      = "fileDiffMode"
+	fileDiffChunkMode = "viewChanges"
 )
 
 var (
-	oldLineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF0000")).
-			Bold(false)
-	newLineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00FF00")).
-			Bold(false)
+	oldLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	newLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+
 	menuItemStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#6F8FAF")).
@@ -32,9 +29,11 @@ type TUI struct {
 	status        *git.Status
 	selectedStyle lipgloss.Style
 
-	selectedDiff  *git.FileDiff
-	selectedChunk *git.FileDiffChunk
-	mode          string
+	selectedDiff   *git.FileDiff
+	selectedChunk  *git.FileDiffChunk
+	st             *ScrollingText
+	deleteChunkMap string
+	mode           string
 }
 
 func NewTUI(status *git.Status, selectedStyle lipgloss.Style) *TUI {
@@ -49,6 +48,11 @@ func NewTUI(status *git.Status, selectedStyle lipgloss.Style) *TUI {
 	} else if len(status.UnstagedFileDiffs) > 0 {
 		tui.selectedDiff = &status.UnstagedFileDiffs[0]
 	}
+
+	if tui.selectedDiff != nil && len(tui.selectedDiff.Chunks) > 0 {
+		tui.selectedChunk = &tui.selectedDiff.Chunks[0]
+	}
+
 	return tui
 }
 
@@ -73,20 +77,24 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			if t.mode == fileDiffMode {
 				return t, tea.Quit
-			} else if t.mode == viewChangesMode {
+			} else if t.mode == fileDiffChunkMode {
 				t.mode = fileDiffMode
 			}
 		case "enter":
 			if t.mode == fileDiffMode {
-				t.mode = viewChangesMode
+				t.mode = fileDiffChunkMode
 			}
 		case "up", "k":
 			if t.mode == fileDiffMode {
-				t.moveCursorBack()
+				t.moveFileDiffCursorBack()
+			} else if t.mode == fileDiffChunkMode {
+				t.moveFileDiffChunkCursorBack()
 			}
 		case "down", "j":
 			if t.mode == fileDiffMode {
-				t.moveCursorForward()
+				t.moveFileDiffCursorForward()
+			} else if t.mode == fileDiffChunkMode {
+				t.moveFileDiffChunkCursorForward()
 			}
 		}
 	}
@@ -94,7 +102,32 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t, nil
 }
 
-func (t *TUI) moveCursorForward() {
+func (t *TUI) moveFileDiffChunkCursorForward() {
+	next := false
+	for _, chunk := range t.selectedDiff.Chunks {
+		if chunk.Equals(*t.selectedChunk) {
+			next = true
+		} else if next {
+			t.selectedChunk = &chunk
+			return
+		}
+	}
+}
+func (t *TUI) moveFileDiffChunkCursorBack() {
+	next := false
+	for i := len(t.selectedDiff.Chunks) - 1; i >= 0; i-- {
+		chunk := t.selectedDiff.Chunks[i]
+		if chunk.Equals(*t.selectedChunk) {
+			next = true
+			continue
+		} else if next {
+			t.selectedChunk = &chunk
+			return
+		}
+	}
+}
+
+func (t *TUI) moveFileDiffCursorForward() {
 	if t.selectedDiff == nil {
 		return
 	}
@@ -118,7 +151,7 @@ func (t *TUI) moveCursorForward() {
 	}
 }
 
-func (t *TUI) moveCursorBack() {
+func (t *TUI) moveFileDiffCursorBack() {
 	if t.selectedDiff == nil {
 		return
 	}
@@ -174,7 +207,11 @@ func (t *TUI) View() string {
 }
 
 func (t *TUI) styleChunk(chunk git.FileDiffChunk) string {
-	return t.styleSnippet(chunk.Old, oldLineStyle) + t.styleSnippet(chunk.New, newLineStyle)
+	if t.selectedChunk != nil && t.selectedChunk.Equals(chunk) {
+		return t.styleSnippet(chunk.Old, t.selectedStyle) + t.styleSnippet(chunk.New, t.selectedStyle)
+	} else {
+		return t.styleSnippet(chunk.Old, oldLineStyle) + t.styleSnippet(chunk.New, newLineStyle)
+	}
 }
 
 func (t *TUI) styleSnippet(snippet git.Snippet, style lipgloss.Style) string {

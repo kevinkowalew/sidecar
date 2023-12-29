@@ -255,22 +255,22 @@ func ParseDiff(filename string, lines []string) (*FileDiff, error) {
 
 func parseFileDiffChunk(filename string, lines []string) (*FileDiffChunk, error) {
 	if len(lines) == 0 {
-		return nil, parseError("empty input")
+		return nil, parseError("empty input", filename)
 	}
 
 	headerParts := strings.Split(lines[0], " ")
-	if len(headerParts) < 5 {
-		return nil, parseError("invalid header: " + lines[0])
+	if len(headerParts) < 4 {
+		return nil, parseError(filename, "invalid header: "+lines[0])
 	}
 
 	oldSnippet, err := parseSnippet(headerParts[1])
 	if err != nil {
-		return nil, parseError("unable to parse old snippet: " + err.Error())
+		return nil, parseError(filename, "unable to parse old snippet: "+err.Error())
 	}
 
 	newSnippet, err := parseSnippet(headerParts[2])
 	if err != nil {
-		return nil, parseError("unable to parse new snippet: " + headerParts[2])
+		return nil, parseError(filename, "unable to parse new snippet: "+headerParts[2])
 	}
 
 	for i := 1; i < len(lines); i++ {
@@ -310,6 +310,6 @@ func parseSnippet(s string) (*Snippet, error) {
 	return snippet, nil
 }
 
-func parseError(msg string) error {
-	return fmt.Errorf("unable to parse FileDiffChunk: %s", msg)
+func parseError(filename, msg string) error {
+	return fmt.Errorf("unable to parse FileDiffChunk (%s): %s", filename, msg)
 }

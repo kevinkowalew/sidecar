@@ -3,8 +3,6 @@ package main
 import (
 	"gitdiff/git"
 	"gitdiff/tui"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 func main() {
@@ -13,9 +11,7 @@ func main() {
 		panic(err)
 	}
 
-	selectedItemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true)
-
-	t := tui.NewTUI(s, selectedItemStyle)
+	t := tui.NewTabs(s.UnstagedFileDiffs, 100)
 	if err = t.Run(); err != nil {
 		panic(err)
 	}
