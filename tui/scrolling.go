@@ -2,45 +2,44 @@ package tui
 
 import (
 	"fmt"
-	"gitdiff/git"
+	"sidecar/git"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	// TODO: make thes
-	oldLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
-	newLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
-
-	menuItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#6F8FAF")).
-			Bold(false).
-			PaddingLeft(1).
-			PaddingRight(1)
-)
-
 type ScrollingText struct {
-	diff          git.FileDiff
+	diff          git.Diff
 	selectedIndex int
 
 	deleted bool
-	commit  map[*git.FileDiffChunk]bool
-	remove  map[*git.FileDiffChunk]bool
-	skip    map[*git.FileDiffChunk]bool
-	history []git.FileDiffChunk
+	commit  map[*git.Chunk]bool
+	remove  map[*git.Chunk]bool
+	skip    map[*git.Chunk]bool
+	history []git.Chunk
+
+	menuItemStyle, oldLineStyle, newLineStyle lipgloss.Style
 }
 
-func NewScollingText(diff git.FileDiff) *ScrollingText {
+func NewScollingText(diff git.Diff, buttonColor lipgloss.AdaptiveColor) *ScrollingText {
+	menuItemStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(buttonColor).
+		Bold(false).
+		PaddingLeft(1).
+		PaddingRight(1)
+
 	t := &ScrollingText{
 		diff:          diff,
 		selectedIndex: -1,
-		commit:        make(map[*git.FileDiffChunk]bool, 0),
-		remove:        make(map[*git.FileDiffChunk]bool, 0),
-		skip:          make(map[*git.FileDiffChunk]bool, 0),
-		history:       make([]git.FileDiffChunk, 0),
+		commit:        make(map[*git.Chunk]bool, 0),
+		remove:        make(map[*git.Chunk]bool, 0),
+		skip:          make(map[*git.Chunk]bool, 0),
+		history:       make([]git.Chunk, 0),
+		menuItemStyle: menuItemStyle,
+		oldLineStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
+		newLineStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
 	}
 
 	if len(diff.Chunks) > 0 {
@@ -69,7 +68,7 @@ func (st *ScrollingText) renderChunks() string {
 	s := ""
 	if st.deleted {
 		s += "Deleted\n\n"
-		s += createMenuItem("Undo", "u")
+		s += st.createMenuItem("Undo", "u")
 		return s
 	}
 	if len(st.history) == len(st.diff.Chunks) {
@@ -93,19 +92,19 @@ func (st *ScrollingText) renderChunks() string {
 	return s
 }
 
-func createMenuItem(title, key string) string {
-	return menuItemStyle.Render(fmt.Sprintf("%s (%s)", title, key)) + " "
+func (st *ScrollingText) createMenuItem(title, key string) string {
+	return st.menuItemStyle.Render(fmt.Sprintf("%s (%s)", title, key)) + " "
 }
 
 func (st *ScrollingText) createMenu() string {
 	s := ""
 	if len(st.history) < len(st.diff.Chunks) {
 		s += fmt.Sprintf("%d/%d ", st.selectedIndex+1-len(st.history), len(st.diff.Chunks)-len(st.history))
-		s += createMenuItem("Commit", "c")
+		s += st.createMenuItem("Commit", "c")
 	}
 
 	if len(st.history) > 0 {
-		s += createMenuItem("Undo", "u")
+		s += st.createMenuItem("Undo", "u")
 	}
 
 	return s
@@ -131,7 +130,7 @@ func (st *ScrollingText) Commit() {
 	st.process(st.commit)
 }
 
-func (st *ScrollingText) process(targetMap map[*git.FileDiffChunk]bool) {
+func (st *ScrollingText) process(targetMap map[*git.Chunk]bool) {
 	if len(st.history) == len(st.diff.Chunks) {
 		return
 	}
@@ -146,8 +145,8 @@ func (st *ScrollingText) process(targetMap map[*git.FileDiffChunk]bool) {
 	}
 }
 
-func (st *ScrollingText) reducedChunks() []git.FileDiffChunk {
-	chunks := make([]git.FileDiffChunk, 0)
+func (st *ScrollingText) reducedChunks() []git.Chunk {
+	chunks := make([]git.Chunk, 0)
 	for _, chunk := range st.diff.Chunks {
 		_, ok := st.commit[&chunk]
 		if ok {
@@ -164,7 +163,7 @@ func (st *ScrollingText) Undo() {
 		return
 	case 1:
 		delete(st.commit, &st.history[len(st.history)-1])
-		st.history = make([]git.FileDiffChunk, 0)
+		st.history = make([]git.Chunk, 0)
 	default:
 		delete(st.commit, &st.history[len(st.history)-1])
 		st.history = st.history[:len(st.history)-1]
@@ -177,10 +176,10 @@ func (st *ScrollingText) Undo() {
 	}
 }
 
-func (st *ScrollingText) getStyledChunkLines(index int, chunk git.FileDiffChunk) []string {
+func (st *ScrollingText) getStyledChunkLines(index int, chunk git.Chunk) []string {
 	return append(
-		st.styleSnippet(chunk.Old, oldLineStyle),
-		st.styleSnippet(chunk.New, newLineStyle)...,
+		st.styleSnippet(chunk.Old, st.oldLineStyle),
+		st.styleSnippet(chunk.New, st.newLineStyle)...,
 	)
 }
 

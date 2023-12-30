@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"gitdiff/git"
-	"gitdiff/tui"
 	"os"
+	"sidecar/sidecar"
 	"strconv"
 )
 
@@ -21,14 +20,13 @@ func main() {
 		return
 	}
 
-	// TODO: implement lazy hot load
-	s, err := git.Current()
+	sc := sidecar.NewSidecar(width, 1)
 	if err != nil {
 		panic(err)
 	}
 
-	t := tui.NewTUI(s.UnstagedFileDiffs, width-20)
-	if err = t.Run(); err != nil {
+	err = sc.Run()
+	if err != nil {
 		panic(err)
 	}
 }

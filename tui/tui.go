@@ -1,37 +1,38 @@
 package tui
 
 import (
-	"gitdiff/git"
+	"sidecar/git"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	inselectedIndexBorder = tabBorderWithBottom("┴", "─", "┴")
-	selectedIndexBorder   = tabBorderWithBottom("┘", " ", "└")
-	docStyle              = lipgloss.NewStyle().Padding(0, 0, 0, 0)
-	highlightColor        = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	inselectedIndexStyle  = lipgloss.NewStyle().Border(inselectedIndexBorder, true).BorderForeground(highlightColor).Padding(0, 1)
-	selectedIndexStyle    = inselectedIndexStyle.Copy().Border(selectedIndexBorder, true)
-	windowStyle           = lipgloss.NewStyle().BorderForeground(highlightColor).Padding(0, 0).Border(lipgloss.NormalBorder()).UnsetBorderTop()
-)
-
 type TUI struct {
-	diffs                      []git.FileDiff
+	Diffs                      []git.Diff
 	textViews                  []*ScrollingText
 	selectedIndex, screenWidth int
+
+	docStyle, inselectedIndexStyle, selectedIndexStyle, windowStyle lipgloss.Style
+	program                                                         *tea.Program
 }
 
-func NewTUI(diffs []git.FileDiff, screenWidth int) *TUI {
+func NewTUI(diffs []git.Diff, screenWidth int, highlightColor lipgloss.AdaptiveColor) *TUI {
+	inselectedIndexBorder := tabBorderWithBottom("┴", "─", "┴")
+	selectedIndexBorder := tabBorderWithBottom("┘", " ", "└")
+	inselectedIndexStyle := lipgloss.NewStyle().Border(inselectedIndexBorder, true).BorderForeground(highlightColor).Padding(0, 1)
+
 	tabs := &TUI{
-		diffs:       diffs,
-		screenWidth: screenWidth,
+		Diffs:                diffs,
+		screenWidth:          screenWidth,
+		docStyle:             lipgloss.NewStyle().Padding(0, 0, 0, 0),
+		inselectedIndexStyle: inselectedIndexStyle,
+		selectedIndexStyle:   inselectedIndexStyle.Copy().Border(selectedIndexBorder, true),
+		windowStyle:          lipgloss.NewStyle().BorderForeground(highlightColor).Padding(0, 0).Border(lipgloss.NormalBorder()).UnsetBorderTop(),
 	}
 
 	for _, diff := range diffs {
-		tabs.textViews = append(tabs.textViews, NewScollingText(diff))
+		tabs.textViews = append(tabs.textViews, NewScollingText(diff, highlightColor))
 	}
 
 	return tabs
@@ -57,6 +58,12 @@ func (t *TUI) allSelectionsComplete() bool {
 	return true
 }
 
+func (t *TUI) UpdateDiffs(diffs []git.Diff) {
+	if !git.DiffSlicesEqual(t.Diffs, diffs) {
+		t.Diffs = diffs
+	}
+}
+
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -64,7 +71,7 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return t, tea.Quit
 		case "right", "l", "n", "tab":
-			if t.selectedIndex < len(t.diffs)-1 {
+			if t.selectedIndex < len(t.Diffs)-1 {
 				t.selectedIndex++
 			} else {
 				t.selectedIndex = 0
@@ -74,7 +81,7 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.selectedIndex > 0 {
 				t.selectedIndex--
 			} else {
-				t.selectedIndex = len(t.diffs) - 1
+				t.selectedIndex = len(t.Diffs) - 1
 			}
 			return t, nil
 		case "j":
@@ -104,14 +111,14 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) removeDiff() {
-	if len(t.diffs) == 1 {
-		t.diffs = make([]git.FileDiff, 0)
+	if len(t.Diffs) == 1 {
+		t.Diffs = make([]git.Diff, 0)
 		t.textViews = make([]*ScrollingText, 0)
 		return
 	}
 
 	if t.selectedIndex >= 0 && t.selectedIndex < len(t.textViews) {
-		t.diffs = append(t.diffs[:t.selectedIndex], t.diffs[t.selectedIndex+1:]...)
+		t.Diffs = append(t.Diffs[:t.selectedIndex], t.Diffs[t.selectedIndex+1:]...)
 		t.textViews = append(t.textViews[:t.selectedIndex], t.textViews[t.selectedIndex+1:]...)
 
 		if t.selectedIndex == len(t.textViews) {
@@ -129,20 +136,20 @@ func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 }
 
 func (t *TUI) View() string {
-	if len(t.diffs) == 0 {
+	if len(t.Diffs) == 0 {
 		return "Scanning for changes..."
 	}
 	doc := strings.Builder{}
 
 	var renderedTUI []string
 
-	for i, diff := range t.diffs {
+	for i, diff := range t.Diffs {
 		var style lipgloss.Style
-		isFirst, isLast, isActive := i == 0, i == len(t.diffs)-1, i == t.selectedIndex
+		isFirst, isLast, isActive := i == 0, i == len(t.Diffs)-1, i == t.selectedIndex
 		if isActive {
-			style = selectedIndexStyle.Copy()
+			style = t.selectedIndexStyle.Copy()
 		} else {
-			style = inselectedIndexStyle.Copy()
+			style = t.inselectedIndexStyle.Copy()
 		}
 		border, _, _, _, _ := style.GetBorder()
 		if isFirst && isActive {
@@ -156,7 +163,7 @@ func (t *TUI) View() string {
 		}
 
 		style = style.Border(border)
-		tabWidth := t.screenWidth / len(t.diffs)
+		tabWidth := t.screenWidth / len(t.Diffs)
 		paddingCount := (tabWidth - len(diff.Filename)) / 2
 		padding := strings.Repeat(" ", paddingCount)
 		renderedTUI = append(renderedTUI, style.Render(padding+diff.Filename+padding))
@@ -168,17 +175,24 @@ func (t *TUI) View() string {
 	textView := t.textViews[t.selectedIndex]
 
 	if textView.Complete() {
-		windowStyle = windowStyle.Align(lipgloss.Center)
+		t.windowStyle = t.windowStyle.Align(lipgloss.Center)
 	} else {
-		windowStyle = windowStyle.Align(lipgloss.Left)
+		t.windowStyle = t.windowStyle.Align(lipgloss.Left)
 	}
-	doc.WriteString(windowStyle.Width((lipgloss.Width(row) - windowStyle.GetHorizontalFrameSize())).Render(textView.Render()))
-	return docStyle.Render(doc.String())
+	doc.WriteString(t.windowStyle.Width((lipgloss.Width(row) - t.windowStyle.GetHorizontalFrameSize())).Render(textView.Render()))
+	return t.docStyle.Render(doc.String())
 }
 
 func (t *TUI) Run() error {
-	_, err := tea.NewProgram(t).Run()
+	t.program = tea.NewProgram(t)
+	_, err := t.program.Run()
 	return err
+}
+
+func (t *TUI) Kill() {
+	if t.program != nil {
+		t.program.Kill()
+	}
 }
 
 func max(a, b int) int {
