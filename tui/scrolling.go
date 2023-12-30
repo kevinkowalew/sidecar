@@ -9,22 +9,37 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	// TODO: make thes
+	oldLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	newLineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+
+	menuItemStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#6F8FAF")).
+			Bold(false).
+			PaddingLeft(1).
+			PaddingRight(1)
+)
+
 type ScrollingText struct {
 	diff          git.FileDiff
 	selectedIndex int
 
-	commitMap map[*git.FileDiffChunk]bool
-	ignoreMap map[*git.FileDiffChunk]bool
-	history   []git.FileDiffChunk
+	deleted bool
+	commit  map[*git.FileDiffChunk]bool
+	remove  map[*git.FileDiffChunk]bool
+	skip    map[*git.FileDiffChunk]bool
+	history []git.FileDiffChunk
 }
 
 func NewScollingText(diff git.FileDiff) *ScrollingText {
-	//TODO: add runtime validation of number of chunks
-	//TODO: make colors injectable
 	t := &ScrollingText{
 		diff:          diff,
 		selectedIndex: -1,
-		commitMap:     make(map[*git.FileDiffChunk]bool, 0),
+		commit:        make(map[*git.FileDiffChunk]bool, 0),
+		remove:        make(map[*git.FileDiffChunk]bool, 0),
+		skip:          make(map[*git.FileDiffChunk]bool, 0),
 		history:       make([]git.FileDiffChunk, 0),
 	}
 
@@ -41,28 +56,34 @@ func (st *ScrollingText) Init() tea.Cmd {
 
 func (st *ScrollingText) Render() string {
 	s := st.renderChunks()
-	s += "\n\n"
 	s += st.createMenu()
 	s += "\n"
 	return s
 }
 
 func (st *ScrollingText) Complete() bool {
-	return len(st.history) == len(st.diff.Chunks)
+	return len(st.history) == len(st.diff.Chunks) || st.deleted
 }
 
 func (st *ScrollingText) renderChunks() string {
+	s := ""
+	if len(st.diff.Chunks) == 0 {
+		s += "Deleted\n\n"
+		s += createMenuItem("Commit", "c")
+		s += createMenuItem("Delete", "d")
+		s += createMenuItem("Skip", "s")
+		return s
+	}
 	if len(st.history) == len(st.diff.Chunks) {
-		return "No remaining changes."
+		return "\nNo remaining changes.\n\n"
 	}
 
-	s := ""
 	for index, chunk := range st.diff.Chunks {
 		if index != st.selectedIndex {
 			continue
 		}
 
-		_, ok := st.commitMap[&chunk]
+		_, ok := st.commit[&chunk]
 		if ok {
 			continue
 		}
@@ -70,19 +91,21 @@ func (st *ScrollingText) renderChunks() string {
 		s += strings.Join(st.getStyledChunkLines(index, chunk), "\n")
 		break
 	}
+	s += "\n\n"
 	return s
 }
 
-func (st *ScrollingText) createMenu() string {
-	createMenuItem := func(title, key string) string {
-		return menuItemStyle.Render(fmt.Sprintf("%s (%s)", title, key)) + " "
-	}
+func createMenuItem(title, key string) string {
+	return menuItemStyle.Render(fmt.Sprintf("%s (%s)", title, key)) + " "
+}
 
+func (st *ScrollingText) createMenu() string {
 	s := ""
 	if len(st.history) < len(st.diff.Chunks) {
 		s += fmt.Sprintf("%d/%d ", st.selectedIndex+1-len(st.history), len(st.diff.Chunks)-len(st.history))
 		s += createMenuItem("Commit", "c")
-		s += createMenuItem("Ignore", "d")
+		s += createMenuItem("Delete", "d")
+		s += createMenuItem("Skip", "s")
 	}
 
 	if len(st.history) > 0 {
@@ -104,12 +127,12 @@ func (st *ScrollingText) MoveCursorBackward() {
 	}
 }
 
-func (st *ScrollingText) Ignore() {
-	st.process(st.commitMap)
+func (st *ScrollingText) Skip() {
+	st.process(st.skip)
 }
 
 func (st *ScrollingText) Commit() {
-	st.process(st.commitMap)
+	st.process(st.commit)
 }
 
 func (st *ScrollingText) process(targetMap map[*git.FileDiffChunk]bool) {
@@ -127,7 +150,7 @@ func (st *ScrollingText) process(targetMap map[*git.FileDiffChunk]bool) {
 func (st *ScrollingText) reducedChunks() []git.FileDiffChunk {
 	chunks := make([]git.FileDiffChunk, 0)
 	for _, chunk := range st.diff.Chunks {
-		_, ok := st.commitMap[&chunk]
+		_, ok := st.commit[&chunk]
 		if ok {
 			continue
 		}
@@ -141,10 +164,10 @@ func (st *ScrollingText) Undo() {
 	case 0:
 		return
 	case 1:
-		delete(st.commitMap, &st.history[len(st.history)-1])
+		delete(st.commit, &st.history[len(st.history)-1])
 		st.history = make([]git.FileDiffChunk, 0)
 	default:
-		delete(st.commitMap, &st.history[len(st.history)-1])
+		delete(st.commit, &st.history[len(st.history)-1])
 		st.history = st.history[:len(st.history)-1]
 	}
 

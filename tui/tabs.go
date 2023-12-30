@@ -9,71 +9,64 @@ import (
 )
 
 var (
-	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
-	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
-	docStyle          = lipgloss.NewStyle().Padding(0, 0, 0, 0)
-	highlightColor    = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	inactiveTabStyle  = lipgloss.NewStyle().Border(inactiveTabBorder, true).BorderForeground(highlightColor).Padding(0, 1)
-	activeTabStyle    = inactiveTabStyle.Copy().Border(activeTabBorder, true)
-	windowStyle       = lipgloss.NewStyle().BorderForeground(highlightColor).Padding(0, 0).Border(lipgloss.NormalBorder()).UnsetBorderTop()
+	inselectedIndexBorder = tabBorderWithBottom("┴", "─", "┴")
+	selectedIndexBorder   = tabBorderWithBottom("┘", " ", "└")
+	docStyle              = lipgloss.NewStyle().Padding(0, 0, 0, 0)
+	highlightColor        = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
+	inselectedIndexStyle  = lipgloss.NewStyle().Border(inselectedIndexBorder, true).BorderForeground(highlightColor).Padding(0, 1)
+	selectedIndexStyle    = inselectedIndexStyle.Copy().Border(selectedIndexBorder, true)
+	windowStyle           = lipgloss.NewStyle().BorderForeground(highlightColor).Padding(0, 0).Border(lipgloss.NormalBorder()).UnsetBorderTop()
 )
 
-type Tabs struct {
-	diffs                  []git.FileDiff
-	scrollingText          *ScrollingText
-	activeTab, screenWidth int
+type TUI struct {
+	diffs                      []git.FileDiff
+	textViews                  []*ScrollingText
+	selectedIndex, screenWidth int
 }
 
-func NewTabs(diffs []git.FileDiff, screenWidth int) *Tabs {
-	tabs := &Tabs{
+func NewTUI(diffs []git.FileDiff, screenWidth int) *TUI {
+	tabs := &TUI{
 		diffs:       diffs,
 		screenWidth: screenWidth,
 	}
-	if len(tabs.diffs) > 0 {
-		tabs.activeTab = 0
-		tabs.scrollingText = NewScollingText(tabs.diffs[tabs.activeTab])
+
+	for _, diff := range diffs {
+		tabs.textViews = append(tabs.textViews, NewScollingText(diff))
 	}
+
 	return tabs
 }
 
-func (t *Tabs) Init() tea.Cmd {
+func (t *TUI) Init() tea.Cmd {
 	return nil
 }
 
-func (t *Tabs) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (t *TUI) textView() *ScrollingText {
+	return t.textViews[t.selectedIndex]
+}
+
+func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
 		case "ctrl+c", "q":
 			return t, tea.Quit
 		case "right", "l", "n", "tab":
-			t.activeTab = min(t.activeTab+1, len(t.diffs)-1)
-			t.scrollingText = NewScollingText(t.diffs[t.activeTab])
+			t.selectedIndex = min(t.selectedIndex+1, len(t.diffs)-1)
 			return t, nil
 		case "left", "h", "p", "shift+tab":
-			t.activeTab = max(t.activeTab-1, 0)
-			t.scrollingText = NewScollingText(t.diffs[t.activeTab])
+			t.selectedIndex = max(t.selectedIndex-1, 0)
 			return t, nil
 		case "j":
-			if t.scrollingText != nil {
-				t.scrollingText.MoveCursorForward()
-			}
+			t.textView().MoveCursorForward()
 		case "k":
-			if t.scrollingText != nil {
-				t.scrollingText.MoveCursorBackward()
-			}
-		case "d":
-			if t.scrollingText != nil {
-				t.scrollingText.Ignore()
-			}
+			t.textView().MoveCursorBackward()
 		case "c":
-			if t.scrollingText != nil {
-				t.scrollingText.Commit()
-			}
+			t.textView().Commit()
+		case "s":
+			t.textView().Skip()
 		case "u":
-			if t.scrollingText != nil {
-				t.scrollingText.Undo()
-			}
+			t.textView().Undo()
 		}
 
 	}
@@ -89,18 +82,18 @@ func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 	return border
 }
 
-func (t *Tabs) View() string {
+func (t *TUI) View() string {
 	doc := strings.Builder{}
 
-	var renderedTabs []string
+	var renderedTUI []string
 
 	for i, diff := range t.diffs {
 		var style lipgloss.Style
-		isFirst, isLast, isActive := i == 0, i == len(t.diffs)-1, i == t.activeTab
+		isFirst, isLast, isActive := i == 0, i == len(t.diffs)-1, i == t.selectedIndex
 		if isActive {
-			style = activeTabStyle.Copy()
+			style = selectedIndexStyle.Copy()
 		} else {
-			style = inactiveTabStyle.Copy()
+			style = inselectedIndexStyle.Copy()
 		}
 		border, _, _, _, _ := style.GetBorder()
 		if isFirst && isActive {
@@ -117,18 +110,24 @@ func (t *Tabs) View() string {
 		tabWidth := t.screenWidth / len(t.diffs)
 		paddingCount := (tabWidth - len(diff.Filename)) / 2
 		padding := strings.Repeat(" ", paddingCount)
-		renderedTabs = append(renderedTabs, style.Render(padding+diff.Filename+padding))
+		renderedTUI = append(renderedTUI, style.Render(padding+diff.Filename+padding))
 	}
 
-	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTUI...)
 	doc.WriteString(row)
 	doc.WriteString("\n")
+	textView := t.textViews[t.selectedIndex]
 
-	doc.WriteString(windowStyle.Width((lipgloss.Width(row) - windowStyle.GetHorizontalFrameSize())).Render(t.scrollingText.Render()))
+	if textView.Complete() {
+		windowStyle = windowStyle.Align(lipgloss.Center)
+	} else {
+		windowStyle = windowStyle.Align(lipgloss.Left)
+	}
+	doc.WriteString(windowStyle.Width((lipgloss.Width(row) - windowStyle.GetHorizontalFrameSize())).Render(textView.Render()))
 	return docStyle.Render(doc.String())
 }
 
-func (t *Tabs) Run() error {
+func (t *TUI) Run() error {
 	_, err := tea.NewProgram(t).Run()
 	return err
 }
