@@ -42,7 +42,19 @@ func (t *TUI) Init() tea.Cmd {
 }
 
 func (t *TUI) textView() *ScrollingText {
-	return t.textViews[t.selectedIndex]
+	if t.selectedIndex < len(t.textViews) {
+		return t.textViews[t.selectedIndex]
+	}
+	return nil
+}
+
+func (t *TUI) allSelectionsComplete() bool {
+	for _, textView := range t.textViews {
+		if !textView.Complete() {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -52,26 +64,60 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return t, tea.Quit
 		case "right", "l", "n", "tab":
-			t.selectedIndex = min(t.selectedIndex+1, len(t.diffs)-1)
+			if t.selectedIndex < len(t.diffs)-1 {
+				t.selectedIndex++
+			} else {
+				t.selectedIndex = 0
+			}
 			return t, nil
 		case "left", "h", "p", "shift+tab":
-			t.selectedIndex = max(t.selectedIndex-1, 0)
+			if t.selectedIndex > 0 {
+				t.selectedIndex--
+			} else {
+				t.selectedIndex = len(t.diffs) - 1
+			}
 			return t, nil
 		case "j":
-			t.textView().MoveCursorForward()
+			if t.textView() != nil {
+				t.textView().MoveCursorForward()
+			}
 		case "k":
-			t.textView().MoveCursorBackward()
+			if t.textView() != nil {
+				t.textView().MoveCursorBackward()
+			}
 		case "c":
-			t.textView().Commit()
-		case "s":
-			t.textView().Skip()
+			if t.textView() != nil {
+				t.textView().Commit()
+				if t.textView().Complete() {
+					t.removeDiff()
+				}
+			}
 		case "u":
-			t.textView().Undo()
+			if t.textView() != nil {
+				t.textView().Undo()
+			}
 		}
 
 	}
 
 	return t, nil
+}
+
+func (t *TUI) removeDiff() {
+	if len(t.diffs) == 1 {
+		t.diffs = make([]git.FileDiff, 0)
+		t.textViews = make([]*ScrollingText, 0)
+		return
+	}
+
+	if t.selectedIndex >= 0 && t.selectedIndex < len(t.textViews) {
+		t.diffs = append(t.diffs[:t.selectedIndex], t.diffs[t.selectedIndex+1:]...)
+		t.textViews = append(t.textViews[:t.selectedIndex], t.textViews[t.selectedIndex+1:]...)
+
+		if t.selectedIndex == len(t.textViews) {
+			t.selectedIndex--
+		}
+	}
 }
 
 func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
@@ -83,6 +129,9 @@ func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 }
 
 func (t *TUI) View() string {
+	if len(t.diffs) == 0 {
+		return "Scanning for changes..."
+	}
 	doc := strings.Builder{}
 
 	var renderedTUI []string

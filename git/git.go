@@ -228,16 +228,17 @@ func ParseDiff(filename string, lines []string) (*FileDiff, error) {
 	for i := 4; i < len(lines); i++ {
 		line := lines[i]
 
-		if strings.HasPrefix(line, "@@") && len(partition) == 0 {
-			partition = append(partition, line)
-		} else if strings.HasPrefix(line, "@@") && len(partition) > 0 {
-			partitions = append(partitions, partition)
-			partition = make([]string, 0)
+		if strings.HasPrefix(line, "@@") {
+			if len(partition) > 0 {
+				partitions = append(partitions, partition)
+				partition = make([]string, 0)
+			}
 			partition = append(partition, line)
 		} else {
 			partition = append(partition, line)
 		}
 	}
+	partitions = append(partitions, partition)
 
 	chunks := make([]FileDiffChunk, 0)
 	for _, partition := range partitions {

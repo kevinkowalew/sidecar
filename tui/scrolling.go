@@ -67,11 +67,9 @@ func (st *ScrollingText) Complete() bool {
 
 func (st *ScrollingText) renderChunks() string {
 	s := ""
-	if len(st.diff.Chunks) == 0 {
+	if st.deleted {
 		s += "Deleted\n\n"
-		s += createMenuItem("Commit", "c")
-		s += createMenuItem("Delete", "d")
-		s += createMenuItem("Skip", "s")
+		s += createMenuItem("Undo", "u")
 		return s
 	}
 	if len(st.history) == len(st.diff.Chunks) {
@@ -104,8 +102,6 @@ func (st *ScrollingText) createMenu() string {
 	if len(st.history) < len(st.diff.Chunks) {
 		s += fmt.Sprintf("%d/%d ", st.selectedIndex+1-len(st.history), len(st.diff.Chunks)-len(st.history))
 		s += createMenuItem("Commit", "c")
-		s += createMenuItem("Delete", "d")
-		s += createMenuItem("Skip", "s")
 	}
 
 	if len(st.history) > 0 {
@@ -136,6 +132,9 @@ func (st *ScrollingText) Commit() {
 }
 
 func (st *ScrollingText) process(targetMap map[*git.FileDiffChunk]bool) {
+	if len(st.history) == len(st.diff.Chunks) {
+		return
+	}
 	chunk := st.diff.Chunks[st.selectedIndex]
 	targetMap[&chunk] = true
 	st.history = append(st.history, chunk)

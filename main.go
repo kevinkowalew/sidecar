@@ -21,6 +21,7 @@ func main() {
 		return
 	}
 
+	// TODO: implement lazy hot load
 	s, err := git.Current()
 	if err != nil {
 		panic(err)
